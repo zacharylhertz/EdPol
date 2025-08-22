@@ -56,7 +56,32 @@ dat <- dat |>
     voted_dem = if_else(voted_pres_party == 1, 1, 0),
     
     # Convert year to factor for plotting
-    year = factor(year)
+    year = factor(year),
+    
+    # Create generations based on Pew Research Center definitions
+    generation = case_when(
+      birthyr <= 1945 ~ "Silent Generation",
+      birthyr >= 1946 & birthyr <= 1964 ~ "Baby Boomers", 
+      birthyr >= 1965 & birthyr <= 1980 ~ "Generation X",
+      birthyr >= 1981 & birthyr <= 1996 ~ "Millennials",
+      birthyr >= 1997 ~ "Generation Z",
+    ),
+    
+    # Create numeric midpoint for each generation for plotting
+    generation_midpoint = case_when(
+      generation == "Pre-Silent" ~ 1920,
+      generation == "Silent Generation" ~ 1936.5,  # midpoint of 1928-1945
+      generation == "Baby Boomers" ~ 1955,         # midpoint of 1946-1964
+      generation == "Generation X" ~ 1972.5,       # midpoint of 1965-1980
+      generation == "Millennials" ~ 1988.5,        # midpoint of 1981-1996
+      generation == "Generation Z" ~ 2004.5,       # midpoint of 1997-2012
+      generation == "Post-Gen Z" ~ 2015
+    ),
+    
+    # Create ordered factor for proper plotting order
+    generation = factor(generation, levels = c("Pre-Silent", "Silent Generation", 
+                                               "Baby Boomers", "Generation X", 
+                                               "Millennials", "Generation Z", "Post-Gen Z"))
   ) |>
   filter(!is.na(party_id))  # Remove missing and "Not Sure" responses
 
@@ -333,3 +358,272 @@ ggsave("images/voted-race.png", p4, width = 6, height = 6, units = "in", dpi = 7
 ggsave("images/pid-dem-race.png", p5, width = 6, height = 6, units = "in", dpi = 700)
 ggsave("images/pid-rep-race.png", p6, width = 6, height = 6, units = "in", dpi = 700)
 ggsave("images/pid-ind-race.png", p7, width = 6, height = 6, units = "in", dpi = 700)
+
+# Sandbox =====================================================================
+# Party identification by generation (all races combined)
+generation_party_raw <- svyby(
+  ~factor(party_id), 
+  ~year + generation, 
+  survey_design, 
+  svymean, 
+  na.rm = TRUE
+) |>
+  as.data.frame()
+
+# Reshape generation party data for plotting
+generation_party_data <- generation_party_raw |>
+  pivot_longer(
+    cols = starts_with("factor(party_id)"),
+    names_to = "party_raw",
+    values_to = "party_share"
+  ) |>
+  mutate(
+    party = str_remove(party_raw, "factor\\(party_id\\)"),
+    se_party = case_when(
+      party == "Democrat" ~ `se.factor(party_id)Democrat`,
+      party == "Republican" ~ `se.factor(party_id)Republican`,
+      party == "Independent/Non-affiliated" ~ `se.factor(party_id)Independent/Non-affiliated`
+    ),
+    # Add generation midpoint for plotting
+    generation_midpoint = case_when(
+      generation == "Silent Generation" ~ 1936.5,
+      generation == "Baby Boomers" ~ 1955,
+      generation == "Generation X" ~ 1972.5,
+      generation == "Millennials" ~ 1988.5,
+      generation == "Generation Z" ~ 2004.5
+    )
+  ) |>
+  select(year, generation, generation_midpoint, party, party_share, se_party) |>
+  filter(!is.na(se_party), !is.na(generation_midpoint))
+
+# Party identification by generation and race
+generation_race_party_raw <- svyby(
+  ~factor(party_id), 
+  ~year + generation + race2, 
+  survey_design, 
+  svymean, 
+  na.rm = TRUE
+) |>
+  as.data.frame()
+
+# Reshape generation by race party data for plotting
+generation_race_party_data <- generation_race_party_raw |>
+  pivot_longer(
+    cols = starts_with("factor(party_id)"),
+    names_to = "party_raw",
+    values_to = "party_share"
+  ) |>
+  mutate(
+    party = str_remove(party_raw, "factor\\(party_id\\)"),
+    se_party = case_when(
+      party == "Democrat" ~ `se.factor(party_id)Democrat`,
+      party == "Republican" ~ `se.factor(party_id)Republican`,
+      party == "Independent/Non-affiliated" ~ `se.factor(party_id)Independent/Non-affiliated`
+    ),
+    # Add generation midpoint for plotting
+    generation_midpoint = case_when(
+      generation == "Silent Generation" ~ 1936.5,
+      generation == "Baby Boomers" ~ 1955,
+      generation == "Generation X" ~ 1972.5,
+      generation == "Millennials" ~ 1988.5,
+      generation == "Generation Z" ~ 2004.5
+    )
+  ) |>
+  select(year, generation, generation_midpoint, race2, party, party_share, se_party) |>
+  filter(!is.na(se_party), !is.na(generation_midpoint))
+
+# Create Visualizations ======================================================
+
+# Overall Generation Plot (all races combined)
+p8 <- ggplot(generation_party_data, aes(x = generation_midpoint, y = party_share,
+                                        group = party, color = party)) +
+  geom_line(size = 1) +
+  geom_point(size = 2) +
+  geom_errorbar(
+    aes(ymin = party_share - 1.41 * se_party,
+        ymax = party_share + 1.41 * se_party),
+    width = 3,
+    alpha = 0.7
+  ) +
+  scale_color_manual(values = c("Democrat" = "#4392F1",
+                                "Republican" = "#D33F49",
+                                "Independent/Non-affiliated" = "#EAC435")) +
+  scale_x_continuous(
+    breaks = c(1936.5, 1955, 1972.5, 1988.5, 2004.5),
+    labels = c("Silent", "Boomers", "Gen X", "Millennials", "Gen Z")
+  ) +
+  labs(
+    y = "Share Identifying with Party (leaners included)",
+    x = "Generation",
+    caption = "Plot: Zachary L. Hertz\nBars indicate 84 percent confidence intervals.\nData: Cumulative CES Common Content"
+  ) +
+  plot_theme +
+  facet_wrap(~year) +
+  theme(
+    strip.text = element_text(size = 10, face = "bold"),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+
+# Generation by Race Plot
+p9 <- ggplot(generation_race_party_data, aes(x = generation_midpoint, y = party_share,
+                                             group = party, color = party)) +
+  geom_line(size = 1) +
+  geom_point(size = 2) +
+  geom_errorbar(
+    aes(ymin = party_share - 1.41 * se_party,
+        ymax = party_share + 1.41 * se_party),
+    width = 3,
+    alpha = 0.7
+  ) +
+  scale_color_manual(values = c("Democrat" = "#4392F1",
+                                "Republican" = "#D33F49",
+                                "Independent/Non-affiliated" = "#EAC435")) +
+  scale_x_continuous(
+    breaks = c(1936.5, 1955, 1972.5, 1988.5, 2004.5),
+    labels = c("Silent", "Boomers", "Gen X", "Millennials", "Gen Z")
+  ) +
+  labs(
+    y = "Share Identifying with Party (leaners included)",
+    x = "Generation",
+    caption = "Plot: Zachary L. Hertz\nBars indicate 84 percent confidence intervals.\nData: Cumulative CES Common Content"
+  ) +
+  plot_theme +
+  facet_grid(race2 ~ year) +
+  theme(
+    strip.text = element_text(size = 9, face = "bold"),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+
+# Individual Race Generation Plots ============================================
+
+# White Americans Generation Plot
+p10 <- ggplot(filter(generation_race_party_data, race2 == "White Americans"), 
+              aes(x = generation_midpoint, y = party_share, group = party, color = party)) +
+  geom_line(size = 1) +
+  geom_point(size = 2) +
+  geom_errorbar(
+    aes(ymin = party_share - 1.41 * se_party,
+        ymax = party_share + 1.41 * se_party),
+    width = 3,
+    alpha = 0.7
+  ) +
+  scale_color_manual(values = c("Democrat" = "#4392F1",
+                                "Republican" = "#D33F49",
+                                "Independent/Non-affiliated" = "#EAC435")) +
+  scale_x_continuous(
+    breaks = c(1936.5, 1955, 1972.5, 1988.5, 2004.5),
+    labels = c("Silent", "Boomers", "Gen X", "Millennials", "Gen Z")
+  ) +
+  labs(
+    y = "Share Identifying with Party (leaners included)",
+    x = "Generation",
+    title = "Party Identification by Generation: White Americans",
+    caption = "Plot: Zachary L. Hertz\nBars indicate 84 percent confidence intervals.\nData: Cumulative CES Common Content"
+  ) +
+  plot_theme +
+  facet_wrap(~year) +
+  theme(
+    strip.text = element_text(size = 10, face = "bold"),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+
+# Black Americans Generation Plot
+p11 <- ggplot(filter(generation_race_party_data, race2 == "Black Americans"), 
+              aes(x = generation_midpoint, y = party_share, group = party, color = party)) +
+  geom_line(size = 1) +
+  geom_point(size = 2) +
+  geom_errorbar(
+    aes(ymin = party_share - 1.41 * se_party,
+        ymax = party_share + 1.41 * se_party),
+    width = 3,
+    alpha = 0.7
+  ) +
+  scale_color_manual(values = c("Democrat" = "#4392F1",
+                                "Republican" = "#D33F49",
+                                "Independent/Non-affiliated" = "#EAC435")) +
+  scale_x_continuous(
+    breaks = c(1936.5, 1955, 1972.5, 1988.5, 2004.5),
+    labels = c("Silent", "Boomers", "Gen X", "Millennials", "Gen Z")
+  ) +
+  labs(
+    y = "Share Identifying with Party (leaners included)",
+    x = "Generation",
+    title = "Party Identification by Generation: Black Americans",
+    caption = "Plot: Zachary L. Hertz\nBars indicate 84 percent confidence intervals.\nData: Cumulative CES Common Content"
+  ) +
+  plot_theme +
+  facet_wrap(~year) +
+  theme(
+    strip.text = element_text(size = 10, face = "bold"),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+
+# Hispanic Americans Generation Plot
+p12 <- ggplot(filter(generation_race_party_data, race2 == "Hispanic Americans"), 
+              aes(x = generation_midpoint, y = party_share, group = party, color = party)) +
+  geom_line(size = 1) +
+  geom_point(size = 2) +
+  geom_errorbar(
+    aes(ymin = party_share - 1.41 * se_party,
+        ymax = party_share + 1.41 * se_party),
+    width = 3,
+    alpha = 0.7
+  ) +
+  scale_color_manual(values = c("Democrat" = "#4392F1",
+                                "Republican" = "#D33F49",
+                                "Independent/Non-affiliated" = "#EAC435")) +
+  scale_x_continuous(
+    breaks = c(1936.5, 1955, 1972.5, 1988.5, 2004.5),
+    labels = c("Silent", "Boomers", "Gen X", "Millennials", "Gen Z")
+  ) +
+  labs(
+    y = "Share Identifying with Party (leaners included)",
+    x = "Generation",
+    title = "Party Identification by Generation: Hispanic Americans",
+    caption = "Plot: Zachary L. Hertz\nBars indicate 84 percent confidence intervals.\nData: Cumulative CES Common Content"
+  ) +
+  plot_theme +
+  facet_wrap(~year) +
+  theme(
+    strip.text = element_text(size = 10, face = "bold"),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+
+# Asian Americans Generation Plot
+p13 <- ggplot(filter(generation_race_party_data, race2 == "Asian Americans"), 
+              aes(x = generation_midpoint, y = party_share, group = party, color = party)) +
+  geom_line(size = 1) +
+  geom_point(size = 2) +
+  geom_errorbar(
+    aes(ymin = party_share - 1.41 * se_party,
+        ymax = party_share + 1.41 * se_party),
+    width = 3,
+    alpha = 0.7
+  ) +
+  scale_color_manual(values = c("Democrat" = "#4392F1",
+                                "Republican" = "#D33F49",
+                                "Independent/Non-affiliated" = "#EAC435")) +
+  scale_x_continuous(
+    breaks = c(1936.5, 1955, 1972.5, 1988.5, 2004.5),
+    labels = c("Silent", "Boomers", "Gen X", "Millennials", "Gen Z")
+  ) +
+  labs(
+    y = "Share Identifying with Party (leaners included)",
+    x = "Generation",
+    title = "Party Identification by Generation: Asian Americans",
+    caption = "Plot: Zachary L. Hertz\nBars indicate 84 percent confidence intervals.\nData: Cumulative CES Common Content"
+  ) +
+  plot_theme +
+  facet_wrap(~year) +
+  theme(
+    strip.text = element_text(size = 10, face = "bold"),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+
+# Save individual race generation plots
+ggsave("images/generation-overall.png", p8, width = 8, height = 6, units = "in", dpi = 700)
+ggsave("images/generation-by-race.png", p9, width = 8, height = 6, units = "in", dpi = 700)
+ggsave("images/generation-white.png", p10, width = 8, height = 6, units = "in", dpi = 700)
+ggsave("images/generation-black.png", p11, width = 8, height = 6, units = "in", dpi = 700)
+ggsave("images/generation-hispanic.png", p12, width = 8, height = 6, units = "in", dpi = 700)
+ggsave("images/generation-asian.png", p13, width = 8, height = 6, units = "in", dpi = 700)
